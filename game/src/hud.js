@@ -1,190 +1,237 @@
-// The HUD: money and health, wanted stars, the clock, the objective line, the speedo,
-// the circular minimap (roads, buildings, player, mission marker, police and traffic),
-// banners, phone calls from Mara, and the title / pause / game-over screens.
+// The HUD: DOM panels for cash, health, wanted stars, speed and the mission
+// objective, plus a 2D canvas minimap drawn from the same city data the world
+// uses. The title, pause and busted screens are DOM overlays in index.html;
+// this file shows and hides them and keeps every number fresh.
 
-import { formatMoney, formatClock, distance2D } from './utils.js';
+import { CITY, DISTRICTS } from './config.js';
+
+function districtAt(x, z) {
+  for (const d of DISTRICTS) {
+    if (x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) return d.name;
+  }
+  return 'Solmar Bay';
+}
+
+function clockText(clock) {
+  const h = Math.floor(clock) % 24;
+  const m = Math.floor((clock - Math.floor(clock)) * 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
 export function createHud(city) {
   const el = (id) => document.getElementById(id);
-  const moneyBox = el('moneyBox');
-  const healthBar = el('healthBar');
-  const armorBar = el('armorBar');
+  const cashEl = el('cash');
+  const districtEl = el('district');
+  const clockEl = el('clock');
   const starsEl = el('stars');
-  const clockBox = el('clockBox');
-  const objectiveTitle = el('objectiveTitle');
-  const objectiveText = el('objectiveText');
-  const objectiveDist = el('objectiveDist');
-  const speedNum = el('speedNum');
-  const speedLabel = el('speedLabel');
-  const banner = el('banner');
-  const bannerTitle = el('bannerTitle');
-  const bannerSub = el('bannerSub');
-  const messageEl = el('message');
-  const crosshair = el('crosshair');
-  const phone = el('phone');
-  const phoneName = el('phoneName');
-  const phoneText = el('phoneText');
+  const healthFill = el('health-fill');
+  const healthText = el('health-text');
+  const weaponEl = el('weapon');
+  const speedEl = el('speed');
+  const objectiveEl = el('objective');
+  const objectiveLabel = el('objective-label');
+  const toastEl = el('toast');
   const minimap = el('minimap');
-  const mctx = minimap.getContext('2d');
-  const status = el('status');
+  const mapCtx = minimap.getContext('2d');
+  const titleEl = el('title-screen');
+  const pauseEl = el('pause-screen');
+  const bustedEl = el('busted-screen');
+  const storyEl = el('story-screen');
+  const titleSave = el('title-save');
+  const pauseSave = el('pause-save');
 
-  let bannerTimer = 0;
-  let messageTimer = 0;
-  let phoneTimer = 0;
+  let lastCash = -1;
+  let lastStars = -1;
+  let lastHealth = -1;
+  let lastWeapon = '';
+  let lastObjective = '';
+  let lastSpeed = -1;
+  let lastDistrict = '';
+  let lastClock = '';
 
-  function setStars(wanted) {
-    let html = '';
-    for (let i = 0; i < 5; i++) {
-      html += i < wanted ? '<span>&#9733;</span>' : '<span class="off">&#9733;</span>';
-    }
-    starsEl.innerHTML = html;
-  }
-
-  function showBanner(title, sub, seconds) {
-    bannerTitle.textContent = title;
-    bannerSub.textContent = sub || '';
-    banner.style.display = 'block';
-    bannerTimer = seconds || 2.6;
-  }
-
-  function showMessage(text, seconds) {
-    messageEl.textContent = text;
-    messageEl.style.display = 'block';
-    messageTimer = seconds || 4;
-  }
-
-  function showPhone(name, text, seconds) {
-    phoneName.textContent = name;
-    phoneText.textContent = text;
-    phone.style.display = 'block';
-    phoneTimer = seconds || 6;
-  }
-
-  function announce(text) {
-    status.textContent = text;
-  }
-
-  function update(dt, s) {
-    // s: { money, health, armor, wanted, minutes, day, objectiveTitle, objectiveText,
-    //      objectiveDist, speedMph, inCar, playerX, playerZ, heading, marker, markerColor,
-    //      policeCars, trafficCars, peds, shooting }
-    moneyBox.childNodes[0].textContent = formatMoney(s.money);
-    healthBar.style.width = Math.max(0, s.health) + '%';
-    armorBar.style.width = Math.max(0, s.armor) + '%';
-    setStars(s.wanted);
-    clockBox.childNodes[0].textContent = formatClock(s.minutes);
-    clockBox.childNodes[1].textContent = 'DAY ' + s.day + ' · SUNNY';
-    objectiveTitle.textContent = s.objectiveTitle;
-    objectiveText.textContent = s.objectiveText;
-    objectiveDist.textContent = s.objectiveDist || '';
-    speedNum.textContent = String(Math.round(s.speedMph));
-    speedLabel.textContent = s.inCar ? 'IN A ' + (s.carName || 'CAR') : 'ON FOOT';
-    crosshair.style.display = s.shooting ? 'block' : 'none';
-    if (bannerTimer > 0) {
-      bannerTimer -= dt;
-      if (bannerTimer <= 0) banner.style.display = 'none';
-    }
-    if (messageTimer > 0) {
-      messageTimer -= dt;
-      if (messageTimer <= 0) messageEl.style.display = 'none';
-    }
-    if (phoneTimer > 0) {
-      phoneTimer -= dt;
-      if (phoneTimer <= 0) phone.style.display = 'none';
-    }
-    drawMinimap(s);
-  }
-
-  function drawMinimap(s) {
-    const W = 420;
-    const half = 300;
-    const scale = W / (half * 2);
-    const toMap = (x, z) => [(x + half) * scale, (z + half) * scale];
-    mctx.clearRect(0, 0, W, W);
-    // Water and sand at the bottom.
-    mctx.fillStyle = '#2a7ab8';
-    mctx.fillRect(0, (340 + half) * scale, W, W);
-    mctx.fillStyle = '#e8d8a0';
-    mctx.fillRect(0, (300 + half) * scale, W, (40) * scale);
-    // Land.
-    mctx.fillStyle = '#8a9a8a';
-    mctx.fillRect(0, 0, W, (300 + half) * scale);
+  function drawMinimap(state) {
+    const size = minimap.width;
+    const scale = size / (CITY.half * 2 + 90);
+    const toMap = (x, z) => [(x + CITY.half + 45) * scale, (z + CITY.half + 45) * scale];
+    mapCtx.clearRect(0, 0, size, size);
+    // Sea and sand.
+    mapCtx.fillStyle = '#2e7f9e';
+    mapCtx.fillRect(0, (CITY.seaZ - CITY.half - 45) * scale, size, size);
+    mapCtx.fillStyle = '#e8cf9a';
+    mapCtx.fillRect(0, (CITY.beachZ - CITY.half - 45) * scale, size, (CITY.seaZ - CITY.beachZ) * scale);
+    // Ground.
+    mapCtx.fillStyle = '#6d7a5c';
+    const g0 = toMap(-CITY.half, -CITY.half);
+    mapCtx.fillRect(g0[0], g0[1], CITY.half * 2 * scale, CITY.half * 2 * scale);
     // Roads.
-    mctx.strokeStyle = '#3a3f46';
-    mctx.lineWidth = 14 * scale;
-    for (const line of city.roadLines) {
-      const [x1, y1] = toMap(line, -270);
-      const [x2, y2] = toMap(line, 270);
-      mctx.beginPath(); mctx.moveTo(x1, y1); mctx.lineTo(x2, y2); mctx.stroke();
-      const [x3, y3] = toMap(-270, line);
-      const [x4, y4] = toMap(270, line);
-      mctx.beginPath(); mctx.moveTo(x3, y3); mctx.lineTo(x4, y4); mctx.stroke();
+    mapCtx.strokeStyle = '#3a3f46';
+    mapCtx.lineWidth = Math.max(2, CITY.road * scale);
+    for (const at of city.lines) {
+      const a = toMap(at, -CITY.half);
+      const b = toMap(at, CITY.half);
+      mapCtx.beginPath();
+      mapCtx.moveTo(a[0], a[1]);
+      mapCtx.lineTo(b[0], b[1]);
+      mapCtx.stroke();
+      const c = toMap(-CITY.half, at);
+      const d = toMap(CITY.half, at);
+      mapCtx.beginPath();
+      mapCtx.moveTo(c[0], c[1]);
+      mapCtx.lineTo(d[0], d[1]);
+      mapCtx.stroke();
     }
     // Buildings.
-    mctx.fillStyle = 'rgba(60,70,80,0.9)';
-    for (const c of city.colliders) {
-      const [x, y] = toMap(c.minX, c.minZ);
-      mctx.fillRect(x, y, (c.maxX - c.minX) * scale, (c.maxZ - c.minZ) * scale);
+    mapCtx.fillStyle = '#b59a80';
+    for (const b of city.buildings) {
+      const p = toMap(b.x0, b.z0);
+      mapCtx.fillRect(p[0], p[1], (b.x1 - b.x0) * scale, (b.z1 - b.z0) * scale);
     }
-    // Traffic dots.
-    mctx.fillStyle = '#ffffff';
-    for (const car of s.trafficCars) {
-      const [x, y] = toMap(car.x, car.z);
-      mctx.fillRect(x - 2, y - 2, 4, 4);
+    // Sun coins not yet taken.
+    mapCtx.fillStyle = '#f2c94c';
+    for (let i = 0; i < city.coins.length; i += 1) {
+      if (state.coinsTaken.includes(i)) continue;
+      const p = toMap(city.coins[i].x, city.coins[i].z);
+      mapCtx.fillRect(p[0] - 1.5, p[1] - 1.5, 3, 3);
     }
-    // Police dots.
-    mctx.fillStyle = '#4a8aff';
-    for (const car of s.policeCars) {
-      const [x, y] = toMap(car.x, car.z);
-      mctx.beginPath(); mctx.arc(x, y, 5, 0, Math.PI * 2); mctx.fill();
+    // Mission target.
+    if (state.mission && state.mission.target) {
+      const p = toMap(state.mission.target.x, state.mission.target.z);
+      mapCtx.fillStyle = '#ffd23d';
+      mapCtx.beginPath();
+      mapCtx.arc(p[0], p[1], 6, 0, Math.PI * 2);
+      mapCtx.fill();
+      mapCtx.strokeStyle = '#7a5a00';
+      mapCtx.lineWidth = 2;
+      mapCtx.stroke();
     }
-    // Mission marker: a pulsing yellow diamond.
-    if (s.marker) {
-      const [x, y] = toMap(s.marker.x, s.marker.z);
-      const pulse = 6 + Math.sin(performance.now() / 200) * 2;
-      mctx.fillStyle = s.markerColor === 0x4ad87a ? '#4ad87a' : '#ffd94d';
-      mctx.beginPath();
-      mctx.moveTo(x, y - pulse);
-      mctx.lineTo(x + pulse, y);
-      mctx.lineTo(x, y + pulse);
-      mctx.lineTo(x - pulse, y);
-      mctx.closePath();
-      mctx.fill();
-      mctx.strokeStyle = '#ffffff';
-      mctx.lineWidth = 2;
-      mctx.stroke();
+    // Police cars.
+    mapCtx.fillStyle = '#2a6df0';
+    for (const car of state.police) {
+      const p = toMap(car.x, car.z);
+      mapCtx.beginPath();
+      mapCtx.arc(p[0], p[1], 3.5, 0, Math.PI * 2);
+      mapCtx.fill();
     }
-    // Player arrow.
-    const [px, py] = toMap(s.playerX, s.playerZ);
-    mctx.save();
-    mctx.translate(px, py);
-    mctx.rotate(s.heading + Math.PI); // heading 0 faces +z, which is down on the map
-    mctx.fillStyle = '#ffffff';
-    mctx.strokeStyle = '#111111';
-    mctx.lineWidth = 2;
-    mctx.beginPath();
-    mctx.moveTo(0, -11);
-    mctx.lineTo(8, 9);
-    mctx.lineTo(0, 4);
-    mctx.lineTo(-8, 9);
-    mctx.closePath();
-    mctx.fill();
-    mctx.stroke();
-    mctx.restore();
-    // North tick.
-    mctx.fillStyle = '#ffffff';
-    mctx.font = 'bold 20px sans-serif';
-    mctx.fillText('N', W / 2 - 7, 22);
+    // Enemies.
+    mapCtx.fillStyle = '#e53d3d';
+    for (const e of state.enemies) {
+      if (!e.alive) continue;
+      const p = toMap(e.x, e.z);
+      mapCtx.beginPath();
+      mapCtx.arc(p[0], p[1], 3, 0, Math.PI * 2);
+      mapCtx.fill();
+    }
+    // The player: a white arrow pointing where they face.
+    const p = state.player;
+    const pp = toMap(p.x, p.z);
+    mapCtx.save();
+    mapCtx.translate(pp[0], pp[1]);
+    mapCtx.rotate(p.angle);
+    mapCtx.fillStyle = '#ffffff';
+    mapCtx.strokeStyle = '#222222';
+    mapCtx.lineWidth = 1.5;
+    mapCtx.beginPath();
+    mapCtx.moveTo(0, -7);
+    mapCtx.lineTo(5, 6);
+    mapCtx.lineTo(0, 3);
+    mapCtx.lineTo(-5, 6);
+    mapCtx.closePath();
+    mapCtx.fill();
+    mapCtx.stroke();
+    mapCtx.restore();
   }
 
-  function showScreen(name) {
-    for (const id of ['screenTitle', 'screenPause', 'screenOver', 'screenHelp']) {
-      el(id).style.display = id === name ? 'flex' : 'none';
+  function update(state) {
+    const p = state.player;
+    if (state.cash !== lastCash) {
+      lastCash = state.cash;
+      cashEl.textContent = `$${state.cash.toLocaleString('en-US')}`;
     }
-    document.getElementById('hud').style.display = name === 'screenTitle' ? 'none' : 'block';
+    const district = districtAt(p.x, p.z);
+    if (district !== lastDistrict) {
+      lastDistrict = district;
+      districtEl.textContent = district;
+    }
+    const clock = clockText(state.clock);
+    if (clock !== lastClock) {
+      lastClock = clock;
+      clockEl.textContent = clock;
+    }
+    if (state.wanted.stars !== lastStars) {
+      lastStars = state.wanted.stars;
+      starsEl.textContent = '★'.repeat(state.wanted.stars) + '☆'.repeat(5 - state.wanted.stars);
+      starsEl.classList.toggle('hot', state.wanted.stars > 0);
+    }
+    const health = Math.ceil(p.health);
+    if (health !== lastHealth) {
+      lastHealth = health;
+      healthFill.style.width = `${health}%`;
+      healthFill.classList.toggle('low', health <= 30);
+      healthText.textContent = `${health}`;
+    }
+    const weapon = p.armed ? 'Pistol' : 'Fists';
+    if (weapon !== lastWeapon) {
+      lastWeapon = weapon;
+      weaponEl.textContent = weapon;
+    }
+    const speed = p.onFoot ? 0 : Math.round(state.speedKmh);
+    if (speed !== lastSpeed) {
+      lastSpeed = speed;
+      speedEl.textContent = p.onFoot ? '' : `${speed} km/h`;
+    }
+    const objective = state.storyDone
+      ? 'Story complete — Solmar Bay is yours. Free roam!'
+      : state.mission
+        ? `${state.mission.isStart ? '◆ ' : '► '}${state.mission.label}`
+        : '';
+    if (objective !== lastObjective) {
+      lastObjective = objective;
+      objectiveEl.textContent = objective;
+      objectiveLabel.textContent = state.storyDone
+        ? 'STORY COMPLETE'
+        : state.mission
+          ? (state.mission.isStart ? 'NEXT JOB' : `MISSION ${state.mission.index + 1} — ${state.mission.name}`)
+          : '';
+    }
+    const msg = state.messages.length > 0 ? state.messages[state.messages.length - 1].text : '';
+    if (toastEl.textContent !== msg) toastEl.textContent = msg;
+    drawMinimap(state);
+  }
+
+  function showOnly(which) {
+    titleEl.classList.toggle('hidden', which !== 'title');
+    pauseEl.classList.toggle('hidden', which !== 'pause');
+    bustedEl.classList.toggle('hidden', which !== 'busted');
+    storyEl.classList.toggle('hidden', which !== 'story');
   }
 
   return {
-    update, showBanner, showMessage, showPhone, announce, showScreen, setStars,
+    update,
+    showTitle(hasSave) {
+      showOnly('title');
+      titleSave.classList.toggle('hidden', !hasSave);
+      el('btn-continue').classList.toggle('hidden', !hasSave);
+    },
+    showPause() {
+      showOnly('pause');
+    },
+    showBusted() {
+      showOnly('busted');
+    },
+    showStory() {
+      showOnly('story');
+    },
+    hideScreens() {
+      showOnly('none');
+    },
+    setPauseSave(text) {
+      pauseSave.textContent = text;
+    },
+    setBustedStats(text) {
+      el('busted-stats').textContent = text;
+    },
+    setStoryStats(text) {
+      el('story-stats').textContent = text;
+    },
   };
 }

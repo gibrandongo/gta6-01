@@ -1,187 +1,193 @@
-// All sound in Solmar Bay is synthesised live with WebAudio — no audio files, no network.
-// Engine hum, gunshots, sirens, pickups, phone rings and a lazy sun-soaked music loop.
+// Synthesized sound only — every effect and the music loop are built with the
+// Web Audio API. No audio files, no network. Audio starts on the first user
+// gesture (browsers block it before then) and stays muted until then.
 
 export function createAudio() {
   let context = null;
   let master = null;
   let musicGain = null;
-  let muted = false;
   let engineOsc = null;
   let engineGain = null;
   let sirenOsc = null;
   let sirenGain = null;
   let musicTimer = null;
-  let musicStep = 0;
+  let muted = false;
+  let step = 0;
+
+  // A warm late-afternoon chord loop: Am7 - Fmaj7 - Cmaj7 - G6, one chord a bar,
+  // a soft bass under it and a sparse plucked melody on top.
+  const CHORDS = [
+    [220.0, 261.63, 329.63, 392.0],
+    [174.61, 220.0, 261.63, 329.63],
+    [196.0, 246.94, 293.66, 329.63],
+    [164.81, 196.0, 246.94, 293.66],
+  ];
+  const MELODY = [440, 0, 523.25, 0, 659.25, 0, 587.33, 523.25, 0, 440, 0, 392, 0, 0, 0, 0];
 
   function ensure() {
     if (context) return true;
     try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return false;
-      context = new AC();
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return false;
+      context = new Ctor();
       master = context.createGain();
-      master.gain.value = 0.5;
+      master.gain.value = muted ? 0 : 0.55;
       master.connect(context.destination);
       musicGain = context.createGain();
       musicGain.gain.value = 0.16;
       musicGain.connect(master);
-      engineGain = context.createGain();
-      engineGain.gain.value = 0;
-      engineGain.connect(master);
       engineOsc = context.createOscillator();
       engineOsc.type = 'sawtooth';
-      engineOsc.frequency.value = 60;
+      engineOsc.frequency.value = 55;
+      engineGain = context.createGain();
+      engineGain.gain.value = 0;
       const engineFilter = context.createBiquadFilter();
       engineFilter.type = 'lowpass';
-      engineFilter.frequency.value = 320;
+      engineFilter.frequency.value = 420;
       engineOsc.connect(engineFilter);
       engineFilter.connect(engineGain);
+      engineGain.connect(master);
       engineOsc.start();
-      sirenGain = context.createGain();
-      sirenGain.gain.value = 0;
-      sirenGain.connect(master);
       sirenOsc = context.createOscillator();
       sirenOsc.type = 'triangle';
-      sirenOsc.frequency.value = 700;
+      sirenOsc.frequency.value = 660;
+      sirenGain = context.createGain();
+      sirenGain.gain.value = 0;
       sirenOsc.connect(sirenGain);
+      sirenGain.connect(master);
       sirenOsc.start();
+      startMusic();
       return true;
     } catch {
+      context = null;
       return false;
     }
   }
 
-  function unlock() {
-    if (ensure() && context.state === 'suspended') context.resume();
+  function note(freq, when, dur, type, gainValue, dest) {
+    const osc = context.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(gainValue, when + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(when);
+    osc.stop(when + dur + 0.05);
   }
-
-  function tone(freq, dur, type, vol, slideTo) {
-    if (!ensure() || muted) return;
-    try {
-      const osc = context.createOscillator();
-      const gain = context.createGain();
-      osc.type = type || 'sine';
-      osc.frequency.setValueAtTime(freq, context.currentTime);
-      if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, context.currentTime + dur);
-      gain.gain.setValueAtTime(vol || 0.2, context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + dur);
-      osc.connect(gain);
-      gain.connect(master);
-      osc.start();
-      osc.stop(context.currentTime + dur + 0.02);
-    } catch {
-      // Sound is garnish; a failure never breaks the game.
-    }
-  }
-
-  function noise(dur, vol, filterFreq) {
-    if (!ensure() || muted) return;
-    try {
-      const len = Math.max(1, Math.floor(context.sampleRate * dur));
-      const buffer = context.createBuffer(1, len, context.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-      const src = context.createBufferSource();
-      src.buffer = buffer;
-      const filter = context.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = filterFreq || 1200;
-      const gain = context.createGain();
-      gain.gain.value = vol || 0.3;
-      src.connect(filter);
-      filter.connect(gain);
-      gain.connect(master);
-      src.start();
-    } catch {
-      // Ignore.
-    }
-  }
-
-  // A lazy two-chord groove: Am7 to Fmaj7, one plucked note per step.
-  const MUSIC_NOTES = [220, 261.63, 329.63, 392, 440, 349.23, 293.66, 329.63];
-  const MUSIC_BASS = [110, 110, 87.31, 87.31, 110, 110, 87.31, 87.31];
 
   function startMusic() {
-    if (!ensure() || musicTimer) return;
-    musicTimer = setInterval(() => {
-      if (muted || !context || context.state !== 'running') return;
-      const step = musicStep % 8;
-      const note = MUSIC_NOTES[step];
-      const bass = MUSIC_BASS[step];
-      try {
-        const t = context.currentTime;
-        const osc = context.createOscillator();
-        osc.type = 'triangle';
-        osc.frequency.value = note;
-        const gain = context.createGain();
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
-        osc.connect(gain);
-        gain.connect(musicGain);
-        osc.start(t);
-        osc.stop(t + 0.45);
-        if (step % 2 === 0) {
-          const bosc = context.createOscillator();
-          bosc.type = 'sine';
-          bosc.frequency.value = bass;
-          const bgain = context.createGain();
-          bgain.gain.setValueAtTime(0.0001, t);
-          bgain.gain.exponentialRampToValueAtTime(0.6, t + 0.03);
-          bgain.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
-          bosc.connect(bgain);
-          bgain.connect(musicGain);
-          bosc.start(t);
-          bosc.stop(t + 0.85);
-        }
-      } catch {
-        // Ignore.
+    // One bar is 2.4 s; schedule a bar ahead, forever.
+    const bar = 2.4;
+    function scheduleBar() {
+      if (!context) return;
+      const chord = CHORDS[step % CHORDS.length];
+      const t0 = context.currentTime + 0.05;
+      for (let i = 0; i < chord.length; i += 1) {
+        note(chord[i] / 2, t0, bar * 0.95, 'sine', 0.5, musicGain);
       }
-      musicStep += 1;
-    }, 340);
-  }
-
-  function setEngine(speedFrac, driving) {
-    if (!context) return;
-    const target = driving ? 0.05 + speedFrac * 0.09 : 0;
-    engineGain.gain.setTargetAtTime(target, context.currentTime, 0.1);
-    engineOsc.frequency.setTargetAtTime(55 + speedFrac * 160, context.currentTime, 0.08);
-  }
-
-  function setSiren(on) {
-    if (!context) return;
-    sirenGain.gain.setTargetAtTime(on && !muted ? 0.045 : 0, context.currentTime, 0.2);
-    if (on) {
-      const now = context.currentTime;
-      sirenOsc.frequency.cancelScheduledValues(now);
-      sirenOsc.frequency.setValueAtTime(660, now);
-      sirenOsc.frequency.linearRampToValueAtTime(920, now + 0.55);
-      sirenOsc.frequency.linearRampToValueAtTime(660, now + 1.1);
+      note(chord[0] / 4, t0, bar * 0.9, 'triangle', 0.7, musicGain);
+      const m = MELODY[step % MELODY.length];
+      if (m > 0) note(m, t0 + bar / 2, 0.5, 'sine', 0.35, musicGain);
+      step += 1;
+      musicTimer = window.setTimeout(scheduleBar, bar * 1000);
     }
+    scheduleBar();
   }
 
-  function toggleMute() {
-    muted = !muted;
-    if (master) master.gain.value = muted ? 0 : 0.5;
-    return muted;
+  function burst(when, dur, freq, type, gainValue) {
+    const size = Math.floor(context.sampleRate * dur);
+    const buffer = context.createBuffer(1, size, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < size; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / size);
+    const src = context.createBufferSource();
+    src.buffer = buffer;
+    const filter = context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = freq;
+    filter.Q.value = 0.8;
+    const gain = context.createGain();
+    gain.gain.value = gainValue;
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+    src.start(when);
+  }
+
+  function unlock() {
+    if (ensure() && context.state === 'suspended') context.resume().catch(() => {});
   }
 
   return {
     unlock,
-    startMusic,
-    setEngine,
-    setSiren,
-    toggleMute,
-    isMuted() { return muted; },
-    shoot() { noise(0.14, 0.5, 2400); tone(180, 0.08, 'square', 0.12, 60); },
-    explosion() { noise(0.7, 0.6, 500); tone(70, 0.6, 'sine', 0.35, 30); },
-    crash() { noise(0.25, 0.35, 700); },
-    pickup() { tone(660, 0.09, 'sine', 0.2); setTimeout(() => tone(990, 0.14, 'sine', 0.2), 90); },
-    cash() { tone(880, 0.08, 'triangle', 0.2); setTimeout(() => tone(1174, 0.1, 'triangle', 0.2), 80); setTimeout(() => tone(1568, 0.18, 'triangle', 0.2), 170); },
-    missionDone() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(f, 0.22, 'triangle', 0.22), i * 120)); },
-    phone() { tone(1200, 0.12, 'sine', 0.18); setTimeout(() => tone(1200, 0.12, 'sine', 0.18), 220); },
-    horn() { tone(370, 0.25, 'square', 0.12); tone(466, 0.25, 'square', 0.1); },
-    hit() { tone(220, 0.1, 'sawtooth', 0.18, 110); },
-    busted() { tone(440, 0.3, 'sawtooth', 0.2, 220); setTimeout(() => tone(330, 0.5, 'sawtooth', 0.2, 165), 300); },
+    setMuted(value) {
+      muted = value;
+      if (master) master.gain.value = value ? 0 : 0.55;
+    },
+    isMuted() {
+      return muted;
+    },
+    /** Engine pitch follows speed 0..1; silent on foot. */
+    engine(speed01, on) {
+      if (!context) return;
+      const target = on ? 0.05 + speed01 * 0.06 : 0;
+      engineGain.gain.setTargetAtTime(target, context.currentTime, 0.08);
+      engineOsc.frequency.setTargetAtTime(52 + speed01 * 130, context.currentTime, 0.1);
+    },
+    /** Two-tone siren while wanted; quiet otherwise. */
+    siren(on, time) {
+      if (!context) return;
+      if (!on) {
+        sirenGain.gain.setTargetAtTime(0, context.currentTime, 0.2);
+        return;
+      }
+      sirenGain.gain.setTargetAtTime(0.045, context.currentTime, 0.2);
+      sirenOsc.frequency.setTargetAtTime(Math.sin(time * 5) > 0 ? 720 : 540, context.currentTime, 0.05);
+    },
+    shot() {
+      if (!ensure()) return;
+      burst(context.currentTime, 0.14, 900, 'square', 0.5);
+    },
+    hit() {
+      if (!ensure()) return;
+      burst(context.currentTime, 0.08, 2400, 'square', 0.3);
+    },
+    crash() {
+      if (!ensure()) return;
+      burst(context.currentTime, 0.3, 300, 'lowpass', 0.7);
+    },
+    pickup() {
+      if (!ensure()) return;
+      const t = context.currentTime;
+      note(880, t, 0.12, 'sine', 0.4, master);
+      note(1318.5, t + 0.09, 0.2, 'sine', 0.4, master);
+    },
+    coin() {
+      if (!ensure()) return;
+      const t = context.currentTime;
+      note(1046.5, t, 0.1, 'sine', 0.35, master);
+      note(1568, t + 0.07, 0.16, 'sine', 0.35, master);
+    },
+    mission() {
+      if (!ensure()) return;
+      const t = context.currentTime;
+      [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => note(f, t + i * 0.11, 0.3, 'triangle', 0.4, master));
+    },
+    fail() {
+      if (!ensure()) return;
+      const t = context.currentTime;
+      [392, 311.13, 261.63].forEach((f, i) => note(f, t + i * 0.14, 0.3, 'triangle', 0.35, master));
+    },
+    click() {
+      if (!ensure()) return;
+      note(660, context.currentTime, 0.06, 'sine', 0.25, master);
+    },
+    stop() {
+      if (musicTimer !== null) window.clearTimeout(musicTimer);
+      if (context) context.close().catch(() => {});
+      context = null;
+    },
   };
 }
