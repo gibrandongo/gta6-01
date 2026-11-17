@@ -3,17 +3,143 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
+<meta name="description" content="Solmar Bay — an original open-world crime game: explore a sun-soaked coastal city on foot or by car, steal cars, run missions for Mara Voss, and stay ahead of the Solmar Bay Police.">
+<link rel="icon" href="data:,">
+<title>Solmar Bay — Open World Crime</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1c2c; font-family: "Trebuchet MS", Verdana, sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); z-index: 5; }
+  #topbar { position: absolute; top: 12px; left: 14px; right: 14px; display: flex; justify-content: space-between; align-items: flex-start; }
+  #moneyBox { font-size: 26px; font-weight: bold; color: #7dff9a; letter-spacing: 1px; }
+  #moneyBox small { display: block; font-size: 12px; color: #ffe9a8; letter-spacing: 2px; }
+  #healthWrap { margin-top: 6px; width: 220px; height: 14px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.5); border-radius: 7px; overflow: hidden; }
+  #healthBar { height: 100%; width: 100%; background: linear-gradient(90deg,#ff5a4e,#ffb84e); transition: width .2s; }
+  #armorWrap { margin-top: 4px; width: 220px; height: 8px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.4); border-radius: 4px; overflow: hidden; }
+  #armorBar { height: 100%; width: 0%; background: #6ec6ff; }
+  #wantedBox { text-align: right; }
+  #stars { font-size: 30px; letter-spacing: 4px; color: #ffd94d; }
+  #stars .off { color: rgba(255,255,255,.28); }
+  #clockBox { font-size: 20px; font-weight: bold; margin-top: 2px; }
+  #clockBox small { display: block; font-size: 11px; color: #cfe8ff; letter-spacing: 1px; }
+  #objective { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; max-width: 560px; }
+  #objectiveTitle { font-size: 19px; font-weight: bold; color: #ffe9a8; letter-spacing: 1px; }
+  #objectiveText { font-size: 15px; margin-top: 2px; }
+  #objectiveDist { font-size: 13px; color: #9fe8ff; }
+  #minimapWrap { position: absolute; left: 14px; bottom: 14px; width: 210px; height: 210px; border: 2px solid rgba(255,255,255,.65); border-radius: 50%; overflow: hidden; background: #12324a; box-shadow: 0 0 0 4px rgba(0,0,0,.35); }
+  #minimap { width: 100%; height: 100%; display: block; }
+  #speedBox { position: absolute; right: 16px; bottom: 16px; text-align: right; font-size: 15px; }
+  #speedNum { font-size: 34px; font-weight: bold; }
+  #speedBox small { display: block; font-size: 11px; color: #cfe8ff; letter-spacing: 1px; }
+  #hintBar { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #e8f4ff; background: rgba(0,0,0,.45); padding: 5px 12px; border-radius: 12px; white-space: nowrap; }
+  #banner { position: absolute; top: 34%; left: 50%; transform: translate(-50%,-50%); text-align: center; display: none; }
+  #bannerTitle { font-size: 52px; font-weight: bold; letter-spacing: 6px; color: #ffd94d; }
+  #bannerSub { font-size: 20px; color: #fff; margin-top: 4px; }
+  #message { position: absolute; top: 58%; left: 50%; transform: translateX(-50%); font-size: 17px; background: rgba(0,0,0,.55); padding: 8px 16px; border-radius: 8px; display: none; max-width: 640px; text-align: center; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; display: none; }
+  #crosshair:before, #crosshair:after { content: ""; position: absolute; background: #fff; }
+  #crosshair:before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #crosshair:after { left: 0; top: 8px; width: 18px; height: 2px; }
+  #phone { position: absolute; right: 16px; top: 110px; width: 300px; background: rgba(8,20,32,.88); border: 1px solid #4d7ea6; border-radius: 10px; padding: 10px 12px; display: none; font-size: 14px; }
+  #phoneName { color: #ffd94d; font-weight: bold; }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 10; background: radial-gradient(ellipse at 50% 30%, rgba(255,170,60,.25), rgba(4,12,22,.88) 70%); color: #fff; }
+  .panel { text-align: center; max-width: 720px; padding: 24px; }
+  .panel h1 { font-size: 64px; margin: 0; letter-spacing: 8px; color: #ffd94d; text-shadow: 0 4px 0 #b3541e, 0 8px 24px rgba(0,0,0,.6); }
+  .panel h2 { font-size: 20px; margin: 6px 0 0; color: #9fe8ff; letter-spacing: 4px; font-weight: normal; }
+  .panel p { font-size: 15px; line-height: 1.55; color: #e8f4ff; }
+  .panel .keys { font-size: 13px; color: #cfe8ff; background: rgba(0,0,0,.4); border-radius: 8px; padding: 10px 14px; text-align: left; display: inline-block; }
+  .btn { pointer-events: auto; cursor: pointer; display: inline-block; margin: 8px 6px 0; padding: 12px 30px; font-size: 18px; font-weight: bold; letter-spacing: 2px; color: #1a2a12; background: linear-gradient(#ffe27a,#ffb84e); border: none; border-radius: 8px; box-shadow: 0 4px 0 #b3541e; }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #b3541e; }
+  .btn.ghost { background: rgba(255,255,255,.14); color: #fff; box-shadow: 0 4px 0 rgba(0,0,0,.5); }
+  #screenTitle { display: flex; }
+  #screenPause, #screenOver, #screenHelp { display: none; }
+  #saveLine { font-size: 13px; color: #9fe8ff; margin-top: 10px; }
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #selftest { display: none; }
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
+<canvas id="game" aria-label="Solmar Bay: an open-world crime game. Explore the city on foot or by car, take on missions, and watch your wanted level."></canvas>
+<div id="hud">
+  <div id="topbar">
+    <div>
+      <div id="moneyBox">$0<small>SOLMAR BAY &bull; DANA MARLOWE</small></div>
+      <div id="healthWrap"><div id="healthBar"></div></div>
+      <div id="armorWrap"><div id="armorBar"></div></div>
+    </div>
+    <div id="objective">
+      <div id="objectiveTitle">SOLMAR BAY</div>
+      <div id="objectiveText">Welcome to the city.</div>
+      <div id="objectiveDist"></div>
+    </div>
+    <div id="wantedBox">
+      <div id="stars"><span class="off">&#9733;</span><span class="off">&#9733;</span><span class="off">&#9733;</span><span class="off">&#9733;</span><span class="off">&#9733;</span></div>
+      <div id="clockBox">12:00<small>DAY 1 &bull; SUNNY</small></div>
+    </div>
+  </div>
+  <div id="minimapWrap"><canvas id="minimap" width="420" height="420"></canvas></div>
+  <div id="speedBox"><span id="speedNum">0</span> mph<small id="speedLabel">ON FOOT</small></div>
+  <div id="hintBar">WASD move &bull; E enter / exit car &bull; Click shoot &bull; Shift run &bull; Space handbrake &bull; Esc pause &bull; M mute</div>
+  <div id="banner"><div id="bannerTitle"></div><div id="bannerSub"></div></div>
+  <div id="message"></div>
+  <div id="crosshair"></div>
+  <div id="phone"><span id="phoneName">MARA</span><div id="phoneText"></div></div>
+</div>
+<div id="screenTitle" class="overlay">
+  <div class="panel">
+    <h1>SOLMAR BAY</h1>
+    <h2>AN OPEN-WORLD CRIME STORY</h2>
+    <p>You are <b>Dana Marlowe</b>, a wheelwoman fresh out of the Marina lockup with $250 and a
+    reputation to rebuild. The fixer <b>Mara Voss</b> has work for you — if you can drive, shoot
+    and stay ahead of the <b>Solmar Bay Police</b>. Steal cars, run jobs across the city, dodge the
+    heat, and buy your way back to the top of the bay.</p>
+    <div class="keys">
+      WASD — move / drive &nbsp;·&nbsp; Mouse drag — look around &nbsp;·&nbsp; Click — shoot<br>
+      E — steal / enter / exit a car &nbsp;·&nbsp; Shift — sprint &nbsp;·&nbsp; Space — handbrake<br>
+      Esc — pause &amp; save &nbsp;·&nbsp; M — mute &nbsp;·&nbsp; H — help &nbsp;·&nbsp; C — change camera
+    </div>
+    <br>
+    <button class="btn" id="btnStart">START ENGINE</button>
+    <button class="btn ghost" id="btnContinue" style="display:none">CONTINUE</button>
+    <div id="saveLine"></div>
+  </div>
+</div>
+<div id="screenPause" class="overlay">
+  <div class="panel">
+    <h1 style="font-size:44px">PAUSED</h1>
+    <p id="pauseStats"></p>
+    <button class="btn" id="btnResume">RESUME</button>
+    <button class="btn ghost" id="btnSave">SAVE GAME</button>
+    <button class="btn ghost" id="btnHelp">HOW TO PLAY</button>
+    <button class="btn ghost" id="btnQuit">QUIT TO TITLE</button>
+    <div id="saveLine2"></div>
+  </div>
+</div>
+<div id="screenOver" class="overlay">
+  <div class="panel">
+    <h1 id="overTitle" style="font-size:56px">WASTED</h1>
+    <p id="overText"></p>
+    <button class="btn" id="btnRetry">BACK ON THE STREETS</button>
+    <button class="btn ghost" id="btnOverTitle">TITLE SCREEN</button>
+  </div>
+</div>
+<div id="screenHelp" class="overlay">
+  <div class="panel">
+    <h1 style="font-size:40px">HOW TO PLAY</h1>
+    <p style="text-align:left">
+    <b>Move:</b> WASD on foot, WASD to drive. Drag the mouse to look, wheel to zoom, C for camera.<br>
+    <b>Cars:</b> walk up to any parked or slow car and press E to take it. Police cars are faster — steal one if you dare.<br>
+    <b>Wanted:</b> stealing, shooting and hurting people raises your wanted level. Police chase harder as stars rise. Hide out of sight and the heat cools off.<br>
+    <b>Missions:</b> follow the yellow marker. Talk to Mara, finish the job, get paid. Taxi fares appear as green markers.<br>
+    <b>Combat:</b> click to shoot. Your pistol is always with you; grab weapon and health pickups around the city.<br>
+    <b>Save:</b> the game autosaves after every mission. Esc, then Save Game, to save any time.
+    </p>
+    <button class="btn" id="btnHelpClose">GOT IT</button>
+  </div>
+</div>
 <p id="status" role="status" aria-live="polite"></p>
+<pre id="selftest"></pre>
+<script src="./vendor/three.min.js"></script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
